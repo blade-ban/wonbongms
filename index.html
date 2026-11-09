@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>한자 찾기 AR</title>
+<style>
+  :root{
+    --bg:#0b1220; --card:#121a2b; --accent:#38bdf8; --accent2:#facc15;
+    --good:#22c55e; --bad:#ef4444; --text:#f1f5f9; --sub:#94a3b8;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%; margin:0; overflow:hidden;}
+  body{
+    font-family:'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Malgun Gothic', sans-serif;
+    background:var(--bg); color:var(--text);
+  }
+  .screen{
+    position:fixed; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; padding:24px;
+    background:var(--bg);
+  }
+  [hidden]{display:none !important;}
+
+  h1{font-size:22px; margin:0 0 4px;}
+  .sub{color:var(--sub); font-size:14px; margin-bottom:20px; text-align:center; line-height:1.5;}
+
+  .card{
+    background:var(--card); border-radius:16px; padding:20px;
+    width:100%; max-width:420px; box-shadow:0 8px 24px rgba(0,0,0,.35);
+  }
+  label{display:block; font-size:13px; color:var(--sub); margin:14px 0 6px;}
+  input[type=text], input[type=number]{
+    width:100%; padding:12px 14px; border-radius:10px; border:1px solid #24314d;
+    background:#0e1626; color:var(--text); font-size:16px;
+  }
+  input:focus{outline:2px solid var(--accent);}
+  .consent-box{
+    margin-top:16px; background:#0e1626; border:1px solid #24314d; border-radius:10px;
+    padding:12px; font-size:12.5px; color:var(--sub); max-height:150px; overflow-y:auto; line-height:1.6;
+  }
+  .consent-row{display:flex; align-items:flex-start; gap:8px; margin-top:12px; font-size:13px;}
+  .consent-row input{width:18px; height:18px; margin-top:2px; flex-shrink:0;}
+
+  button{
+    font-family:inherit; cursor:pointer; border:none; border-radius:12px;
+    font-weight:700; font-size:16px; padding:14px 18px; width:100%;
+  }
+  .btn-primary{background:var(--accent); color:#04121f; margin-top:18px;}
+  .btn-primary:disabled{background:#33415c; color:#7c8aa5; cursor:not-allowed;}
+  .btn-secondary{background:#1c2740; color:var(--text); margin-top:10px; border:1px solid #2f3d5c;}
+  .btn-ghost{background:transparent; color:var(--accent); text-decoration:underline; font-size:13px; padding:6px;}
+
+  /* 권한 화면 */
+  .perm-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:#0e1626; border-radius:12px; padding:14px; margin-bottom:10px;
+  }
+  .perm-row .label{font-size:14px;}
+  .perm-row .desc{font-size:11.5px; color:var(--sub); margin-top:2px;}
+  .perm-status{font-size:13px; font-weight:700; padding:6px 10px; border-radius:8px; white-space:nowrap;}
+  .perm-status.ok{background:rgba(34,197,94,.15); color:var(--good);}
+  .perm-status.no{background:rgba(148,163,184,.15); color:var(--sub);}
+  .perm-status.err{background:rgba(239,68,68,.15); color:var(--bad);}
+  .perm-btn{width:auto; padding:8px 14px; font-size:13px; background:var(--accent); color:#04121f; border-radius:8px;}
+
+  /* 게임 화면 */
+  #screen-game{padding:0; align-items:stretch; justify-content:flex-start;}
+  #camera-video{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; background:#000;
+    pointer-events:none; /* 일부 iOS Safari(특정 기종/버전)는 playsinline video가 z-index와 무관하게
+                             탭 이벤트를 가로채는 경우가 있어, 포획 버튼 등 상위 레이어 터치가 씹히는
+                             문제가 생길 수 있음 — 영상은 배경일 뿐 상호작용이 필요 없으므로 명시적으로 차단 */
+  }
+  #camera-fallback{
+    position:absolute; inset:0; z-index:0;
+    background: radial-gradient(circle at 50% 40%, #16213c, #060a14 75%);
+  }
+  #hud-top{
+    position:absolute; top:0; left:0; right:0; z-index:5;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:calc(10px + env(safe-area-inset-top)) 14px 10px;
+    background:linear-gradient(rgba(0,0,0,.55), transparent);
+  }
+  #hud-top .who{font-size:13px;}
+  #hud-top .who b{color:var(--accent2);}
+  #hud-score{font-size:14px; font-weight:800; color:var(--accent2); text-align:right;}
+  #hud-progress{font-size:13.5px; color:var(--text); font-weight:700; margin-top:2px;}
+  #hud-timer{font-size:12px; color:var(--sub); margin-top:2px; font-variant-numeric:tabular-nums; text-align:right;}
+  #hud-timer.urgent{color:var(--bad); font-weight:800;}
+  .hud-icon-btn{
+    width:34px; height:34px; padding:0; border-radius:50%; font-size:16px;
+    background:rgba(18,26,43,.75); border:1px solid #2f3d5c; flex-shrink:0;
+  }
+
+  /* 나침반 테이프 (상단, 발견 안된 목표 방향 안내) */
+  #compass-tape-wrap{
+    position:absolute; top:64px; left:0; right:0; z-index:5; height:44px;
+    overflow:hidden; pointer-events:none;
+  }
+  #compass-tape{
+    position:absolute; top:0; left:50%; height:100%; white-space:nowrap;
+  }
+  .tape-mark{
+    position:absolute; top:0; transform:translateX(-50%);
+    display:flex; flex-direction:column; align-items:center; font-size:11px; color:var(--sub);
+  }
+  .tape-mark .glyph{
+    font-size:16px; background:rgba(18,26,43,.75); border:1px solid #2f3d5c;
+    border-radius:8px; padding:2px 6px; color:var(--text);
+  }
+  .tape-cardinal{color:var(--accent); font-weight:800; font-size:12px;}
+  #compass-center-line{
+    position:absolute; top:60px; left:50%; transform:translateX(-50%);
+    width:2px; height:14px; background:var(--accent); z-index:6; opacity:.85;
+  }
+
+  /* AR 레이어: 근접+정면 목표가 뜨는 곳 */
+  #ar-layer{position:absolute; inset:0; z-index:4; pointer-events:none;}
+  .ar-marker{
+    position:absolute; top:38%; transform:translate(-50%,-50%);
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    transition: left .12s linear, transform .18s ease-out, opacity .15s linear;
+    pointer-events:auto; z-index:1;
+  }
+  .ar-marker.capturable{ z-index:10; }
+  .ar-glyph{
+    font-size:54px; line-height:1; color:#fff;
+    text-shadow:0 0 18px rgba(56,189,248,.9), 0 2px 6px rgba(0,0,0,.6);
+    animation: float 2.4s ease-in-out infinite;
+  }
+  .ar-marker.capturable .ar-glyph{
+    text-shadow:0 0 26px rgba(250,204,21,1), 0 2px 8px rgba(0,0,0,.6);
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes float{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
+  @keyframes pulse{ 0%,100%{transform:scale(1);} 50%{transform:scale(1.12);} }
+  .ar-dist{
+    font-size:11px; background:rgba(0,0,0,.55); padding:3px 8px; border-radius:999px; color:var(--sub);
+  }
+  .ar-marker.capturable .ar-dist{color:var(--accent2); font-weight:800;}
+  .ar-tapbtn{
+    margin-top:2px; background:var(--accent2); color:#241a02; font-size:12px; font-weight:800;
+    padding:6px 14px; border-radius:999px; border:none;
+  }
+
+  #hud-bottom{
+    position:absolute; left:0; right:0; bottom:0; z-index:5;
+    padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+    background:linear-gradient(transparent, rgba(0,0,0,.6));
+  }
+  #nearest-info{
+    background:rgba(18,26,43,.8); border:1px solid #2f3d5c; border-radius:12px;
+    padding:10px 14px; font-size:13px; display:flex; align-items:center; gap:10px;
+  }
+  #nearest-info .arrow{font-size:20px; transition:transform .15s linear;}
+  #nearest-info .txt{flex:1; line-height:1.4;}
+  #nearest-info .txt b{color:var(--accent2);}
+
+  /* 퀴즈 모달 */
+  #quiz-modal{
+    position:fixed; inset:0; z-index:20; background:rgba(4,8,18,.88);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  #quiz-modal.hidden{display:none;}
+  .quiz-card{
+    background:var(--card); border-radius:18px; padding:24px 20px; width:100%; max-width:400px;
+    text-align:center; box-shadow:0 12px 30px rgba(0,0,0,.5);
+  }
+  .quiz-hanja{font-size:72px; margin:6px 0 4px; text-shadow:0 0 20px rgba(56,189,248,.5);}
+  .quiz-q{font-size:14px; color:var(--sub); margin-bottom:18px;}
+  .quiz-opts{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .quiz-opt{
+    background:#0e1626; border:1.5px solid #2f3d5c; border-radius:12px; padding:14px 8px;
+    font-size:15px; color:var(--text);
+  }
+  .quiz-opt.correct{background:rgba(34,197,94,.2); border-color:var(--good); color:var(--good);}
+  .quiz-opt.wrong{background:rgba(239,68,68,.2); border-color:var(--bad); color:var(--bad);}
+  .quiz-feedback{margin-top:14px; font-size:13.5px; min-height:20px; color:var(--sub);}
+  .quiz-attempts{margin-top:6px; font-size:11.5px; color:var(--sub);}
+  .quiz-hint{margin-top:8px; font-size:12.5px; color:var(--accent2); background:rgba(250,204,21,.1); border:1px solid rgba(250,204,21,.35); border-radius:10px; padding:8px 10px; display:none;}
+  .quiz-hint.show{display:block;}
+
+  /* 토스트 */
+  #toast{
+    position:fixed; left:50%; top:18%; transform:translate(-50%,-10px); z-index:30;
+    background:rgba(34,197,94,.95); color:#04120a; font-weight:800; padding:12px 20px;
+    border-radius:999px; font-size:15px; opacity:0; transition:opacity .25s, transform .25s;
+    pointer-events:none; white-space:nowrap; max-width:calc(100vw - 40px); overflow:hidden; text-overflow:ellipsis;
+  }
+  #toast.show{opacity:1; transform:translate(-50%,0);}
+
+  /* 완료 화면 */
+  #finish-list{width:100%; max-width:420px; margin-top:14px; max-height:40vh; overflow-y:auto;}
+  .finish-row{
+    display:flex; justify-content:space-between; align-items:center; padding:10px 4px;
+    border-bottom:1px solid #24314d; font-size:14px;
+  }
+  .finish-row .g{font-size:20px; margin-right:8px;}
+
+  /* 리더보드 모달 */
+  #leaderboard-modal{
+    position:fixed; inset:0; z-index:25; background:rgba(4,8,18,.9);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  #leaderboard-modal.hidden{display:none;}
+  .lb-card{
+    background:var(--card); border-radius:18px; padding:20px; width:100%; max-width:420px;
+    box-shadow:0 12px 30px rgba(0,0,0,.5); max-height:80vh; display:flex; flex-direction:column;
+  }
+  .lb-card h2{margin:0 0 4px; font-size:18px;}
+  .lb-sub{color:var(--sub); font-size:12px; margin-bottom:12px;}
+  #lb-list{overflow-y:auto; flex:1;}
+  .lb-row{
+    display:flex; align-items:center; gap:10px; padding:9px 6px; border-bottom:1px solid #24314d; font-size:13.5px;
+  }
+  .lb-row.me{background:rgba(56,189,248,.12); border-radius:8px;}
+  .lb-rank{width:26px; text-align:center; font-weight:800; color:var(--sub);}
+  .lb-row:nth-child(1) .lb-rank{color:#facc15;}
+  .lb-row:nth-child(2) .lb-rank{color:#cbd5e1;}
+  .lb-row:nth-child(3) .lb-rank{color:#d97706;}
+  .lb-name{flex:1;}
+  .lb-name .sid{color:var(--sub); font-size:11px; margin-left:4px;}
+  .lb-score{font-weight:800; color:var(--accent2);}
+  .lb-empty{color:var(--sub); font-size:13px; text-align:center; padding:20px 0;}
+  .lb-loading{color:var(--sub); font-size:13px; text-align:center; padding:20px 0;}
+
+  /* 도감 모달 */
+  #dex-modal{
+    position:fixed; inset:0; z-index:25; background:rgba(4,8,18,.9);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  #dex-modal.hidden{display:none;}
+  #dex-grid{
+    overflow-y:auto; flex:1; display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; padding:4px 2px;
+  }
+  .dex-card{
+    background:#0e1626; border:1.5px solid #2f3d5c; border-radius:12px; padding:10px 4px;
+    text-align:center; display:flex; flex-direction:column; align-items:center; gap:2px;
+  }
+  .dex-card.found{border-color:var(--accent); background:rgba(56,189,248,.08);}
+  .dex-card.mine{border-color:var(--accent2); background:rgba(250,204,21,.08);}
+  .dex-card .glyph{font-size:32px; line-height:1.2;}
+  .dex-card.locked .glyph{color:#33415c;}
+  .dex-card .reading{font-size:11px; color:var(--sub); margin-top:2px;}
+  .dex-card .radical{font-size:10px; color:var(--accent); margin-top:1px;}
+  .dex-card .by{font-size:9.5px; color:var(--accent2); margin-top:2px;}
+
+  /* 지도 모달 */
+  #map-modal{
+    position:fixed; inset:0; z-index:25; background:rgba(4,8,18,.9);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  #map-modal.hidden{display:none;}
+  .map-card{max-width:460px;}
+  #map-wrap{
+    position:relative; width:100%; border-radius:12px; overflow:hidden;
+    background:#0e1626; border:1px solid #2f3d5c;
+  }
+  #map-img{display:block; width:100%; height:auto;}
+  #map-markers{position:absolute; inset:0;}
+  .map-marker{
+    position:absolute; transform:translate(-50%,-50%);
+    width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:14px; font-weight:800; line-height:1; box-shadow:0 2px 6px rgba(0,0,0,.5);
+  }
+  .map-marker.found{background:var(--accent); color:#04121f; border:2px solid #fff;}
+  .map-marker.unfound{
+    background:rgba(148,163,184,.55); color:#0b1220; width:16px; height:16px; font-size:10px;
+    border:1.5px solid rgba(255,255,255,.6);
+  }
+  .map-marker.me{
+    background:#fff; color:#2563eb; width:16px; height:16px; font-size:10px; border:2px solid #2563eb;
+    box-shadow:0 0 0 6px rgba(37,99,235,.25);
+  }
+  .map-legend{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-top:10px; font-size:11.5px; color:var(--sub);}
+  .map-legend-dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle;}
+  .map-legend-dot.found{background:var(--accent);}
+  .map-legend-dot.unfound{background:rgba(148,163,184,.55);}
+  .map-legend-dot.me{background:#fff; border:2px solid #2563eb;}
+  .map-error{padding:30px 10px; text-align:center; color:var(--sub); font-size:13px;}
+
+  /* 디버그 패널 */
+  #debug-toggle{
+    position:absolute; right:10px; bottom:96px; z-index:6; width:38px; height:38px; border-radius:50%;
+    background:rgba(18,26,43,.75); color:var(--sub); font-size:16px; border:1px solid #2f3d5c;
+  }
+  #debug-panel{
+    position:absolute; right:10px; bottom:140px; z-index:6; width:230px;
+    background:rgba(10,15,26,.92); border:1px solid #2f3d5c; border-radius:12px; padding:12px; font-size:12px;
+  }
+  #debug-panel.hidden{display:none;}
+  #debug-panel div{margin-bottom:6px; color:var(--sub);}
+  #debug-panel b{color:var(--text);}
+  #debug-panel input[type=range]{width:100%;}
+  .err-banner{
+    position:absolute; top:64px; left:10px; right:10px; z-index:8; background:rgba(239,68,68,.9);
+    color:#fff; font-size:12.5px; padding:10px 12px; border-radius:10px; display:none;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ 0. CONFIG ============ -->
+<script>
+  // ★★★ 배포 전 반드시 아래 URL을 본인의 Google Apps Script 웹앱 URL로 교체하세요 ★★★
+  // (Apps Script 편집기 > 배포 > 웹 앱으로 배포 > 실행 URL을 복사해서 넣기)
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbzeicIypvM8Hp45HYZX98OTOKBoEWUlL8jozemS8cgPlCJI0eFyP0bgRMQec_WYZP0H/exec";
+
+  // GAS_URL이 실제로 설정되었는지는 "http로 시작하는가"로 판단합니다.
+  // (주의) 아래처럼 GAS_URL 문자열 자체를 다른 곳에 그대로 복사해서 비교하는 방식은 쓰지 마세요 —
+  // 편집기의 "전체 찾아바꾸기"로 GAS_URL을 채울 때 이 판정 코드까지 함께 바뀌어버려서,
+  // "GAS_URL이 자기 자신을 포함하는지" 검사가 되어 버리는(즉 늘 true가 되는) 실제 사고가 있었습니다.
+  function isBackendConfigured(){
+    return typeof GAS_URL === 'string' && GAS_URL.indexOf('http') === 0;
+  }
+
+  // 학교 지도 미니맵이 설정되었는지 여부. MAP_IMAGE_URL이 비어 있으면 지도 기능 자체를 숨깁니다(선택 기능).
+  function isMapConfigured(){
+    return typeof GAME_CONFIG.MAP_IMAGE_URL === 'string' && GAME_CONFIG.MAP_IMAGE_URL.length > 0;
+  }
+
+  const GAME_CONFIG = {
+    ALIGN_TOLERANCE_DEG: 25,   // 이 각도 이내로 방향을 맞추면 "정면"으로 인정
+    AR_FOV_DEG: 70,            // AR 레이어에 아이콘이 보이는 화면 시야각(가정치)
+    TAPE_RANGE_DEG: 100,       // 상단 나침반 테이프가 좌우로 보여주는 범위
+    HEADING_CALIBRATION_OFFSET: 0, // 기기 오차 보정용(디버그 패널에서 조정 가능)
+    TIME_LIMIT_SEC: 1200,       // 제한시간(초). 0 또는 null로 설정하면 시간 제한 없음
+    HINT_AFTER_WRONG: 2,       // 이 횟수 이상 오답을 고르면 힌트(설명 컬럼)를 보여줌
+    TEAM_POLL_SEC: 8,         // 팀 플레이 시 팀원의 포획 결과를 다시 불러오는 주기(초) — 짧을수록 실시간에 가까워지지만 서버 요청이 늘어남
+    TEAM_MAX_MEMBERS: 5,      // 팀 코드 하나에 허용되는 최대 인원 수 — 화면 안내 문구용. 실제 정원 제한은
+                              // AppsScript_백엔드.gs의 CONFIG.TEAM_MAX_MEMBERS(서버)가 판단하므로, 값을
+                              // 바꾸려면 두 곳(이 값과 .gs의 값)을 반드시 함께 수정해야 함
+
+    // ===== 학교 지도 미니맵 (선택 기능) =====
+    // "🗺 지도" 버튼을 누르면 아래 이미지를 띄우고, 그 위에 찾은/못 찾은 한자와 내 현재 위치를 표시합니다.
+    // MAP_IMAGE_URL을 비워두면(기본값) 지도 버튼 자체가 화면에 나타나지 않습니다.
+    MAP_IMAGE_URL: 'school_map.png',       // 예: 'school_map.png' (이 index.html과 같은 폴더에 올린 학교 항공사진/안내도 파일명 또는 URL)
+    // 이미지 위에서 서로 다른(대각선 방향으로 멀리 떨어진) 두 지점을 고르세요. 그 두 지점의 실제
+    // 위도·경도(한자 좌표를 구한 것과 같은 방법)와, 이미지 안에서 그 지점이 가로·세로로 몇 %(0~100)
+    // 위치에 있는지(이미지를 열어 눈대중으로 가늠)를 아래에 입력하면, 나머지 한자 위치는 자동 계산됩니다.
+     MAP_CALIBRATION: {
+      p1: { lat: 36.613786, lng: 127.504897, xPct: 12.0, yPct: 57.3 },
+      p2: { lat: 36.613965, lng: 127.506483, xPct: 85.4, yPct: 44.3 }
+    },
+  };
+
+  // GAS_URL 설정 전 미리보기/테스트용 샘플 데이터 (실제 배포 시 시트 데이터로 자동 대체됨)
+  // 좌표는 예시입니다 — 실제 학교 지점 좌표로 교체해서 시트에 입력하세요.
+  const SAMPLE_HANJA_DATA = [
+    { id:'h1', hanja:'學', reading:'배울 학', wrong1:'가르칠 교', wrong2:'물을 문', wrong3:'익힐 습', lat:36.63000, lng:127.47000, radius:15, hint:'교문 근처', radical:'子' },
+    { id:'h2', hanja:'校', reading:'학교 교', wrong1:'집 가', wrong2:'고을 읍', wrong3:'집 실', lat:36.63030, lng:127.47020, radius:15, hint:'운동장 근처', radical:'木' },
+    { id:'h3', hanja:'書', reading:'글 서', wrong1:'그림 화', wrong2:'말씀 언', wrong3:'셈 산', lat:36.62990, lng:127.47040, radius:15, hint:'도서관 근처', radical:'曰' },
+    { id:'h4', hanja:'門', reading:'문 문', wrong1:'담 장', wrong2:'길 로', wrong3:'창 창', lat:36.63020, lng:127.46970, radius:15, hint:'정문 근처', radical:'門' },
+    { id:'h5', hanja:'心', reading:'마음 심', wrong1:'몸 신', wrong2:'힘 력', wrong3:'뜻 의', lat:36.62975, lng:127.46990, radius:15, hint:'상담실 근처', radical:'心' },
+    { id:'h6', hanja:'友', reading:'벗 우', wrong1:'스승 사', wrong2:'백성 민', wrong3:'사람 인', lat:36.63010, lng:127.47060, radius:15, hint:'급식실 근처', radical:'又' },
+  ];
+</script>
+
+<!-- ============ 1. 시작 화면 (이름/학번/동의) ============ -->
+<div class="screen" id="screen-start">
+  <div class="card">
+    <h1>📍 한자 찾기 AR</h1>
+    <div class="sub">학교 곳곳에 숨어있는 한자를 찾아 포획하는 위치 기반 학습 게임입니다. 실외에서 휴대폰을 들고 이동하며 진행합니다.</div>
+
+    <label for="input-name">이름</label>
+    <input type="text" id="input-name" placeholder="예: 홍길동" autocomplete="off">
+
+    <label for="input-sid">학번</label>
+    <input type="text" id="input-sid" placeholder="예: 20203" inputmode="numeric" autocomplete="off">
+
+    <label for="input-team">팀 코드 <span style="font-weight:400;" id="team-cap-note">(선택 — 협동학습 시 같은 팀원과 동일하게 입력하면 도감을 함께 모읍니다)</span></label>
+    <input type="text" id="input-team" placeholder="예: 1모둠 (비워두면 개인 플레이)" autocomplete="off">
+
+    <div class="consent-box">
+      <b>[개인정보 수집·이용 동의]</b><br>
+      1. 수집 항목: 이름, 학번, 한자 포획 활동 기록(정답 여부, 시도 횟수, 활동 위치)<br>
+      2. 이용 목적: 개인별 수업 참여 여부 및 학습 완료 확인<br>
+      3. 이용 주체: 한문교과 담당 교사<br>
+      4. 이용 기간: 2026년 학년말까지 보유 후 즉시 파기<br>
+      5. 동의를 거부할 권리가 있으며, 거부 시 본 게임 활동 참여가 제한될 수 있습니다.<br>
+      <span style="opacity:.7"></span>
+    </div>
+    <div class="consent-row">
+      <input type="checkbox" id="input-consent">
+      <label for="input-consent" style="margin:0; color:var(--text); font-size:13px;">위 개인정보 수집·이용에 동의합니다.</label>
+    </div>
+
+    <button class="btn-primary" id="btn-to-permission" disabled>다음 (권한 설정) →</button>
+    <div style="display:flex; gap:6px;">
+      <button class="btn-ghost" id="btn-open-leaderboard-start" style="width:100%;">🏆 리더보드</button>
+      <button class="btn-ghost" id="btn-open-dex-start" style="width:100%;">📖 모은 도감 보기</button>
+      <button class="btn-ghost map-btn" id="btn-open-map-start" style="width:100%;">🗺 지도</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 2. 권한 요청 화면 ============ -->
+<div class="screen" id="screen-permission" hidden>
+  <div class="card">
+    <h1>🔐 권한 설정</h1>
+    <div class="sub">AR 게임을 실행하려면 위치와 방향 센서 권한이 필요합니다. 카메라는 선택 사항입니다(허용하면 실제 카메라 화면 위에 한자가 나타납니다).</div>
+
+    <div class="perm-row">
+      <div>
+        <div class="label">📍 위치(GPS)</div>
+        <div class="desc">필수 — 한자와의 거리 계산에 사용</div>
+      </div>
+      <div>
+        <span class="perm-status no" id="status-geo">대기</span>
+        <button class="perm-btn" id="btn-req-geo">허용</button>
+      </div>
+    </div>
+
+    <div class="perm-row">
+      <div>
+        <div class="label">🧭 방향(나침반)</div>
+        <div class="desc">필수 — 바라보는 방향 판정에 사용</div>
+      </div>
+      <div>
+        <span class="perm-status no" id="status-orient">대기</span>
+        <button class="perm-btn" id="btn-req-orient">허용</button>
+      </div>
+    </div>
+
+    <div class="perm-row">
+      <div>
+        <div class="label">📷 카메라</div>
+        <div class="desc">선택 — 미허용 시 배경화면으로 대체</div>
+      </div>
+      <div>
+        <span class="perm-status no" id="status-cam">대기</span>
+        <button class="perm-btn" id="btn-req-cam">허용</button>
+      </div>
+    </div>
+
+    <div class="err-banner-static sub" id="perm-hint" style="text-align:left; margin-top:6px;"></div>
+
+    <button class="btn-primary" id="btn-start-game" disabled>🎮 AR 게임 시작</button>
+    <button class="btn-ghost" id="btn-skip-cam" style="width:100%;">카메라 없이 계속하기 →</button>
+  </div>
+</div>
+
+<!-- ============ 3. 게임 화면 ============ -->
+<div class="screen" id="screen-game" hidden>
+  <video id="camera-video" autoplay playsinline muted hidden></video>
+  <div id="camera-fallback"></div>
+
+  <div class="err-banner" id="err-banner"></div>
+
+  <div id="hud-top">
+    <div>
+      <div class="who">👤 <b id="hud-name">-</b></div>
+      <div id="hud-progress">찾은 한자 0 / 0</div>
+    </div>
+    <div style="display:flex; align-items:flex-start; gap:8px;">
+      <button class="hud-icon-btn map-btn" id="btn-open-map-game" title="지도 보기">🗺</button>
+      <button class="hud-icon-btn" id="btn-open-dex-game" title="도감 보기">📖</button>
+      <div>
+        <div id="hud-score">0점</div>
+        <div id="hud-timer">-</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="compass-tape-wrap">
+    <div id="compass-tape"></div>
+  </div>
+  <div id="compass-center-line"></div>
+
+  <div id="ar-layer"></div>
+
+  <div id="hud-bottom">
+    <div id="nearest-info">
+      <div class="arrow" id="nearest-arrow">➜</div>
+      <div class="txt" id="nearest-text">위치 확인 중...</div>
+    </div>
+  </div>
+
+  <button id="debug-toggle">🛠</button>
+  <div id="debug-panel" class="hidden">
+    <div>heading: <b id="dbg-heading">-</b></div>
+    <div>lat/lng: <b id="dbg-pos">-</b></div>
+    <div>가장 가까운 목표: <b id="dbg-nearest">-</b></div>
+    <label style="font-size:11px;">방위 보정(°)
+      <input type="range" id="dbg-cal" min="-180" max="180" value="0">
+      <span id="dbg-cal-val">0</span>
+    </label>
+    <div style="margin-top:8px; border-top:1px solid #2f3d5c; padding-top:8px;">
+      테스트 모드(센서 없이 확인)
+    </div>
+    <label style="font-size:11px;">수동 방향(°)
+      <input type="range" id="dbg-heading-manual" min="0" max="359" value="0">
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:11px;">
+      <input type="checkbox" id="dbg-force-inrange" style="width:14px;height:14px;"> 항상 사거리 안으로 취급
+    </label>
+  </div>
+</div>
+
+<!-- ============ 4. 완료 화면 ============ -->
+<div class="screen" id="screen-finish" hidden>
+  <div class="card">
+    <h1 id="finish-title">🎉 모든 한자 포획 완료!</h1>
+    <div class="sub" id="finish-summary">-</div>
+    <div id="finish-list"></div>
+    <button class="btn-primary" id="btn-open-dex-finish">📖 도감 보기</button>
+    <button class="btn-secondary map-btn" id="btn-open-map-finish">🗺 지도 보기</button>
+    <button class="btn-secondary" id="btn-open-leaderboard-finish">🏆 리더보드 보기</button>
+    <button class="btn-secondary" id="btn-restart">처음으로</button>
+  </div>
+</div>
+
+<!-- ============ 리더보드 모달 ============ -->
+<div id="leaderboard-modal" class="hidden">
+  <div class="lb-card">
+    <h2>🏆 리더보드</h2>
+    <div class="lb-sub">누적 점수 상위 순위 (정답 포획 기준)</div>
+    <div id="lb-list"><div class="lb-loading">불러오는 중...</div></div>
+    <button class="btn-secondary" id="btn-close-leaderboard">닫기</button>
+  </div>
+</div>
+
+<!-- ============ 도감 모달 ============ -->
+<div id="dex-modal" class="hidden">
+  <div class="lb-card">
+    <h2>📖 한자 도감</h2>
+    <div class="lb-sub" id="dex-sub">지금까지 모은 한자</div>
+    <div id="dex-grid"><div class="lb-loading">불러오는 중...</div></div>
+    <button class="btn-secondary" id="btn-close-dex">닫기</button>
+  </div>
+</div>
+
+<!-- ============ 지도 모달 ============ -->
+<div id="map-modal" class="hidden">
+  <div class="lb-card map-card">
+    <h2>🗺 학교 지도</h2>
+    <div class="lb-sub">찾은 한자와 아직 못 찾은 한자의 대략적인 위치, 내 현재 위치를 표시합니다</div>
+    <div id="map-wrap">
+      <img id="map-img" alt="학교 지도">
+      <div id="map-markers"></div>
+    </div>
+    <div class="map-legend">
+      <span><span class="map-legend-dot found"></span>찾은 한자</span>
+      <span><span class="map-legend-dot unfound"></span>못 찾은 한자</span>
+      <span><span class="map-legend-dot me"></span>내 위치</span>
+    </div>
+    <button class="btn-secondary" id="btn-close-map">닫기</button>
+  </div>
+</div>
+
+<!-- ============ 퀴즈 모달 ============ -->
+<div id="quiz-modal" class="hidden">
+  <div class="quiz-card">
+    <div class="quiz-hanja" id="quiz-hanja">漢</div>
+    <div class="quiz-q">이 한자의 <b>훈(뜻)과 음(소리)</b>은 무엇일까요?</div>
+    <div class="quiz-opts" id="quiz-opts"></div>
+    <div class="quiz-hint" id="quiz-hint"></div>
+    <div class="quiz-feedback" id="quiz-feedback"></div>
+    <div class="quiz-attempts" id="quiz-attempts"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- 상태 ---------------- */
+  const state = {
+    name:'', studentId:'', team:'',
+    hanjaList: [],       // 서버(또는 샘플)에서 받아온 전체 목표 목록
+    captured: {},         // id -> {attempts, score, mine, capturedBy}  ※ 팀원이 잡은 것도 여기 포함됨
+    currentPos: null,     // {lat,lng}
+    heading: 0,           // 0~360, 0=정북
+    calOffset: 0,
+    manualMode: false,
+    forceInRange: false,
+    activeQuiz: null,     // 현재 퀴즈 중인 hanja 객체
+    watchId: null,
+    startedAt: null,
+    timerInterval: null,
+    remainingSec: 0,
+    dexPollInterval: null,
+    dexModalOpen: false,
+    mapModalOpen: false,
+  };
+
+  const $ = (id)=>document.getElementById(id);
+
+  $('team-cap-note').textContent = '(선택 — 협동학습 시 같은 팀원과 동일하게 입력하면 도감을 함께 모읍니다. 한 팀 최대 '+GAME_CONFIG.TEAM_MAX_MEMBERS+'명)';
+
+  // 지도 미니맵이 설정되지 않았으면(GAME_CONFIG.MAP_IMAGE_URL 비어있음) 지도 버튼 자체를 숨김
+  if (!isMapConfigured()){
+    document.querySelectorAll('.map-btn').forEach(function(b){ b.hidden = true; });
+  }
+
+  /* ---------------- 지리 계산 (test_geo.js 로 검증됨) ---------------- */
+  function toRad(d){ return d*Math.PI/180; }
+  function toDeg(r){ return r*180/Math.PI; }
+  function distanceMeters(lat1,lon1,lat2,lon2){
+    const R=6371000;
+    const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+    const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+  function bearingDeg(lat1,lon1,lat2,lon2){
+    const y=Math.sin(toRad(lon2-lon1))*Math.cos(toRad(lat2));
+    const x=Math.cos(toRad(lat1))*Math.sin(toRad(lat2)) - Math.sin(toRad(lat1))*Math.cos(toRad(lat2))*Math.cos(toRad(lon2-lon1));
+    return (toDeg(Math.atan2(y,x))+360)%360;
+  }
+  function angleDiffSigned(target, current){
+    // target 방향으로 가려면 몇 도 회전해야 하는지 (-180~180, 양수=시계방향/오른쪽)
+    let d = (target - current + 540) % 360 - 180;
+    return d;
+  }
+  function angleDiffAbs(a,b){
+    const d = Math.abs(a-b) % 360;
+    return d>180 ? 360-d : d;
+  }
+
+  /**
+   * 위도·경도를 지도 이미지 위의 좌표(%, 0~100)로 변환한다. 학교 운동장 규모처럼 좁은 범위를
+   * 다루므로, 위도→세로(%)·경도→가로(%)를 각각 선형 보간하는 간단한 근사만으로 충분하다고 보고
+   * 설계함(정밀 지도 투영 변환은 불필요). 두 기준점(MAP_CALIBRATION.p1/p2)의 위도 또는 경도가
+   * 같으면(즉 대각선이 아니라 같은 위도선/경도선 위의 두 점이면) 계산이 불가능하므로 null 반환.
+   */
+  function geoToImagePercent(lat, lng){
+    const c = GAME_CONFIG.MAP_CALIBRATION;
+    if (!c || !c.p1 || !c.p2) return null;
+    const dLng = c.p2.lng - c.p1.lng;
+    const dLat = c.p2.lat - c.p1.lat;
+    if (!dLng || !dLat) return null;
+    const tX = (lng - c.p1.lng) / dLng;
+    const tY = (lat - c.p1.lat) / dLat;
+    const xPct = c.p1.xPct + tX * (c.p2.xPct - c.p1.xPct);
+    const yPct = c.p1.yPct + tY * (c.p2.yPct - c.p1.yPct);
+    // 기준점 바깥 범위의 좌표라도 마커가 지도 테두리 안에는 보이도록 살짝 여유를 두고 고정(clamp)한다.
+    return { xPct: Math.max(2, Math.min(98, xPct)), yPct: Math.max(2, Math.min(98, yPct)) };
+  }
+
+  /* ---------------- 1. 시작 화면 ---------------- */
+  function checkStartValid(){
+    const ok = $('input-name').value.trim() && $('input-sid').value.trim() && $('input-consent').checked;
+    $('btn-to-permission').disabled = !ok;
+  }
+  ['input','change'].forEach(evt=>{
+    $('input-name').addEventListener(evt, checkStartValid);
+    $('input-sid').addEventListener(evt, checkStartValid);
+    $('input-consent').addEventListener(evt, checkStartValid);
+  });
+
+  $('btn-to-permission').addEventListener('click', function(){
+    state.name = $('input-name').value.trim();
+    state.studentId = $('input-sid').value.trim();
+    state.team = $('input-team').value.trim();
+
+    const btn = $('btn-to-permission');
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = '확인 중...';
+
+    registerParticipant(state.name, state.studentId, state.team).then(function(result){
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+      if (result.ok){
+        show('screen-permission');
+        checkGeoPermissionProactively();
+      } else if (result.error === 'team_full'){
+        alert('"'+state.team+'" 팀은 이미 최대 인원('+(result.limit||GAME_CONFIG.TEAM_MAX_MEMBERS)+'명)이 모두 참여했습니다. 다른 팀 코드를 사용하거나 담당 선생님께 문의해 주세요.');
+      } else {
+        alert('참가 등록에 실패했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.');
+      }
+    });
+  });
+
+  /**
+   * 참가자 등록을 서버에 보내고, 응답을 기다렸다가 성공 여부를 반환한다.
+   * 팀 코드가 있으면 서버(참가자 시트)에서 해당 팀의 인원수(최대 5명, CONFIG.TEAM_MAX_MEMBERS)를
+   * 확인해 정원이 찼으면 등록 자체를 거부한다 — 그래서 여기서는(기존 postToBackend와 달리)
+   * "보내고 나서 다음 화면으로 넘어가는" 방식이 아니라, 서버 응답을 반드시 확인한 뒤에만
+   * 권한 설정 화면으로 넘어가도록 한다. 샘플 모드(GAS_URL 미설정)에서는 인원 제한을 검사할
+   * 서버가 없으므로 그냥 통과시킨다.
+   */
+  function registerParticipant(name, studentId, team){
+    if (!isBackendConfigured()){
+      return Promise.resolve({ ok:true });
+    }
+    return fetch(GAS_URL, {
+      method:'POST',
+      headers: { 'Content-Type':'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action:'register', name:name, studentId:studentId, team:team, consent:true, userAgent:navigator.userAgent })
+    }).then(function(r){ return r.json(); }).catch(function(){
+      return { ok:false, error:'network' };
+    });
+  }
+
+  /* ---------------- 2. 권한 요청 ---------------- */
+  let geoGranted=false, orientGranted=false, camGranted=false;
+
+  function setStatus(el, kind, text){
+    el.className = 'perm-status ' + kind;
+    el.textContent = text;
+  }
+
+  function updateStartGameBtn(){
+    $('btn-start-game').disabled = !(geoGranted && orientGranted);
+  }
+
+  /* 위치 권한을 한 번 "차단(거부)"하면, 이후에는 "허용" 버튼을 눌러도 브라우저가 OS 권한창을
+     다시 띄우지 않고 조용히 즉시 거부만 반복한다 — 사용자 입장에서는 "버튼이 안 눌리는 것"처럼
+     보인다. 기기(iOS/Android)별로 차단을 해제하는 경로가 달라서, 플랫폼을 감지해 구체적인
+     안내를 보여준다. */
+  function detectPermPlatform(){
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.indexOf('Macintosh') !== -1 && navigator.maxTouchPoints > 1);
+    if (isIOS) return 'ios';
+    if (/Android/.test(ua)) return 'android';
+    return 'other';
+  }
+
+  function geoDeniedHintHTML(){
+    const platform = detectPermPlatform();
+    if (platform === 'ios'){
+      return '📍 위치 권한이 차단되어 있어, "허용" 버튼을 눌러도 다시 묻지 않고 바로 거부됩니다. 아이폰에서는 아래 순서로 확인해 주세요.<br>' +
+             '① 설정 앱 → 개인정보 보호 및 보안 → 위치 서비스 → 맨 위 "위치 서비스" 토글이 꺼져 있으면 켜기 (이 메뉴 자체가 회색으로 눌리지 않는다면 "스크린타임" 제한일 수 있어, 보호자(부모님) 암호가 있어야만 풀 수 있습니다)<br>' +
+             '② 같은 화면 목록에서 "Safari 웹사이트"를 찾아 "허용"으로 변경<br>' +
+             '③ Safari에서 이 사이트를 열고 주소창의 "AA" 아이콘(또는 자물쇠) → 웹사이트 설정 → 위치 → "허용"으로 변경<br>' +
+             '모두 확인한 뒤 이 페이지로 돌아와 새로고침하고 다시 "허용"을 눌러 주세요.';
+    }
+    if (platform === 'android'){
+      return '📍 위치 권한이 차단되어 있어, "허용" 버튼을 눌러도 다시 묻지 않고 바로 거부됩니다. 주소창의 자물쇠(🔒) 또는 정보 아이콘을 눌러 → 권한(또는 사이트 설정) → 위치 → "허용"으로 바꾼 뒤, 페이지를 새로고침하고 다시 "허용"을 눌러 주세요.';
+    }
+    return '📍 위치 권한이 차단되어 있어, "허용" 버튼을 눌러도 다시 묻지 않고 바로 거부됩니다. 브라우저 주소창의 자물쇠 아이콘 → 사이트 설정에서 위치 접근을 "허용"으로 바꾼 뒤 새로고침하고 다시 시도해 주세요.';
+  }
+
+  /* 권한 화면에 들어오는 즉시(버튼을 누르기 전에) 이미 차단된 상태인지 먼저 확인해서 안내 문구를
+     미리 보여준다 — 그래야 "허용"을 눌러도 OS 권한창이 뜨지 않는 상황에서 사용자가 "버튼이
+     고장났다"고 오해하지 않는다. Permissions API를 지원하지 않는 브라우저(일부 iOS Safari 등)에서는
+     조용히 넘어가고, 기존처럼 버튼을 눌렀을 때의 결과로만 안내한다. */
+  function checkGeoPermissionProactively(){
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    navigator.permissions.query({ name:'geolocation' }).then(function(status){
+      function reflect(){
+        if (status.state === 'denied' && !geoGranted){
+          setStatus($('status-geo'),'err','차단됨');
+          $('perm-hint').innerHTML = geoDeniedHintHTML();
+        } else if (status.state !== 'denied' && $('status-geo').textContent === '차단됨'){
+          setStatus($('status-geo'),'no','대기');
+          $('perm-hint').textContent = '';
+        }
+      }
+      reflect();
+      status.onchange = reflect; // 설정을 바꾸고 돌아오면(지원 브라우저에서는) 자동으로 갱신됨
+    }).catch(function(){ /* 일부 iOS Safari 등은 geolocation 권한 조회 자체를 지원하지 않음 — 무시 */ });
+  }
+
+  $('btn-req-geo').addEventListener('click', function(){
+    if(!navigator.geolocation){
+      setStatus($('status-geo'),'err','미지원'); return;
+    }
+    setStatus($('status-geo'),'no','요청 중');
+    navigator.geolocation.getCurrentPosition(function(pos){
+      geoGranted = true;
+      state.currentPos = { lat:pos.coords.latitude, lng:pos.coords.longitude };
+      setStatus($('status-geo'),'ok','허용됨');
+      updateStartGameBtn();
+    }, function(err){
+      setStatus($('status-geo'),'err','차단됨');
+      $('perm-hint').innerHTML = geoDeniedHintHTML();
+    }, { enableHighAccuracy:true, timeout:10000 });
+  });
+
+  $('btn-req-orient').addEventListener('click', function(){
+    function attach(){
+      orientGranted = true;
+      setStatus($('status-orient'),'ok','허용됨');
+      updateStartGameBtn();
+      window.addEventListener('deviceorientationabsolute', onOrientation, true);
+      window.addEventListener('deviceorientation', onOrientation, true);
+    }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      // iOS 13+
+      DeviceOrientationEvent.requestPermission().then(function(resp){
+        if (resp === 'granted') attach();
+        else { setStatus($('status-orient'),'err','거부됨'); }
+      }).catch(function(){
+        setStatus($('status-orient'),'err','오류');
+      });
+    } else if ('DeviceOrientationEvent' in window) {
+      attach();
+    } else {
+      setStatus($('status-orient'),'err','미지원');
+      $('perm-hint').textContent = '이 기기/브라우저는 방향 센서를 지원하지 않습니다. 디버그 패널의 테스트 모드로 미리 확인할 수 있습니다.';
+    }
+  });
+
+  $('btn-req-cam').addEventListener('click', function(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      setStatus($('status-cam'),'err','미지원'); return;
+    }
+    navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' }, audio:false }).then(function(stream){
+      camGranted = true;
+      const v = $('camera-video');
+      v.srcObject = stream;
+      v.hidden = false;
+      $('camera-fallback').style.display='none';
+      setStatus($('status-cam'),'ok','허용됨');
+    }).catch(function(){
+      setStatus($('status-cam'),'err','거부됨');
+    });
+  });
+
+  $('btn-skip-cam').addEventListener('click', function(){
+    if (!geoGranted || !orientGranted){
+      $('perm-hint').textContent = '위치와 방향 센서 권한은 필수입니다. 먼저 허용해 주세요.';
+      return;
+    }
+    startGame();
+  });
+
+  $('btn-start-game').addEventListener('click', startGame);
+
+  /* ---------------- 3. 게임 로직 ---------------- */
+  function startGame(){
+    show('screen-game');
+    state.startedAt = Date.now();
+    $('hud-name').textContent = state.name + (state.team ? ' · '+state.team : '');
+    loadHanjaList().then(function(){
+      return syncDex(); // 이전에 모아둔(개인 또는 팀) 도감을 먼저 반영
+    }).then(function(){
+      updateHud();
+      if (state.team){
+        state.dexPollInterval = setInterval(syncDex, GAME_CONFIG.TEAM_POLL_SEC*1000);
+      }
+      if (navigator.geolocation){
+        state.watchId = navigator.geolocation.watchPosition(function(pos){
+          state.currentPos = { lat:pos.coords.latitude, lng:pos.coords.longitude };
+          renderFrame();
+        }, function(){ showErr('위치 신호를 받을 수 없습니다. 실외로 이동하거나 GPS를 확인하세요.'); }, { enableHighAccuracy:true, maximumAge:1000 });
+      }
+      startTimer();
+      renderFrame();
+      checkFinish();
+    });
+  }
+
+  function stopDexPoll(){
+    if (state.dexPollInterval){ clearInterval(state.dexPollInterval); state.dexPollInterval = null; }
+  }
+
+  /**
+   * 서버에서 받아온 도감 목록(dexList)을 state.captured에 병합한다.
+   * 이미 내가 직접(로컬에서) 포획 처리한 항목(mine:true)은 절대 덮어쓰지 않는다 — 이게 없으면
+   * 방금 내가 잡은 한자가 다음 폴링에서 서버 값으로 되돌아가며 깜빡이거나, 아직 서버 반영이
+   * 늦은 사이에 "내가 잡았는데 도감엔 안 보이는" 현상이 생길 수 있다.
+   * teamCtx/nameCtx는 이 병합이 "누구 기준으로" 일어나는지(팀 여부, 내 이름)를 명시적으로 받는다
+   * — state.team/state.name에만 의존하면 아직 등록 전(시작 화면에서 도감만 미리 보는 경우)에는
+   * 항상 빈 값이라 팀 모드 판단이 틀어지기 때문.
+   */
+  function mergeDexEntries(dexList, teamCtx, nameCtx){
+    let changed = false;
+    (dexList||[]).forEach(function(entry){
+      const id = String(entry.hanjaId);
+      const existing = state.captured[id];
+      if (existing && existing.mine) return;
+      if (!existing) changed = true;
+      state.captured[id] = {
+        attempts: entry.attempts != null ? Number(entry.attempts) : 1,
+        score: entry.score != null ? Number(entry.score) : 0,
+        capturedBy: entry.capturedBy || '',
+        mine: teamCtx ? (entry.capturedBy === nameCtx) : true
+      };
+    });
+    return changed;
+  }
+
+  /** state.captured(로컬에서 이미 아는 정보)만으로 도감 그리드에 넘길 맵을 만든다. */
+  function buildDexMapFromState(){
+    const map = {};
+    Object.keys(state.captured).forEach(function(id){
+      const c = state.captured[id];
+      map[id] = { capturedBy: c.capturedBy || (c.mine ? state.name : ''), mine: !!c.mine };
+    });
+    return map;
+  }
+
+  /**
+   * 서버(기록 시트)에서 지금까지 모은 도감(개인 또는 팀)을 불러와 state.captured에 병합.
+   * 팀 플레이 중이면 주기적으로 호출되어 팀원의 새 포획 결과를 반영한다(근실시간 동기화).
+   */
+  function syncDex(){
+    if (!state.team && !(state.name && state.studentId)) return Promise.resolve();
+    return fetchDexFromServer(state.team, state.name, state.studentId).then(function(dex){
+      if (!dex) return;
+      const changed = mergeDexEntries(dex, state.team, state.name);
+      if (changed){
+        updateHud();
+        renderFrame();
+        checkFinish();
+        if (state.dexModalOpen) renderDexGrid(buildDexMapFromState());
+        if (state.mapModalOpen) renderMapMarkers();
+      }
+    }).catch(function(){ /* 실패해도 다음 폴링에서 재시도되므로 조용히 무시 */ });
+  }
+
+  /**
+   * GAS_URL이 설정된 경우에만 실제 서버에서 도감 데이터를 가져온다. team이 있으면 team 기준,
+   * 없으면 name+studentId 기준. 서버가 아직 예전 버전(도감/팀 기능이 없는 .gs)으로 배포되어
+   * 있으면 ?action=dex 요청에도 한자 목록(hanjaList)이 돌아오는데, 이 경우를 감지해서
+   * 재배포가 필요하다는 안내를 화면에 띄운다(무한정 "안 보여요" 상태로 남지 않도록).
+   */
+  function fetchDexFromServer(team, name, studentId){
+    if (!isBackendConfigured()) return Promise.resolve(null);
+    const qs = team
+      ? ('team=' + encodeURIComponent(team))
+      : ('name=' + encodeURIComponent(name||'') + '&studentId=' + encodeURIComponent(studentId||''));
+    return fetch(GAS_URL + '?action=dex&' + qs).then(function(r){ return r.json(); }).then(function(data){
+      if (data && data.hanjaList && !data.dex){
+        showErr('⚠ Apps Script가 이전 버전으로 배포되어 있어 도감·팀 기능이 동작하지 않습니다. Apps Script 편집기에서 "배포 > 배포 관리 > 새 버전"으로 다시 배포해 주세요.', true);
+        return [];
+      }
+      return (data && data.ok) ? (data.dex || []) : [];
+    });
+  }
+
+  /* ---------------- 제한시간 타이머 ---------------- */
+  function startTimer(){
+    if (!GAME_CONFIG.TIME_LIMIT_SEC){
+      $('hud-timer').textContent = '';
+      return;
+    }
+    state.remainingSec = GAME_CONFIG.TIME_LIMIT_SEC;
+    updateTimerDisplay();
+    state.timerInterval = setInterval(function(){
+      state.remainingSec--;
+      updateTimerDisplay();
+      if (state.remainingSec <= 0){
+        clearInterval(state.timerInterval);
+        state.timerInterval = null;
+        showFinish('timeup');
+      }
+    }, 1000);
+  }
+
+  function stopTimer(){
+    if (state.timerInterval){ clearInterval(state.timerInterval); state.timerInterval = null; }
+  }
+
+  function updateTimerDisplay(){
+    const el = $('hud-timer');
+    const m = Math.floor(state.remainingSec/60);
+    const s = state.remainingSec % 60;
+    el.textContent = '⏱ ' + m + ':' + (s<10?'0':'') + s;
+    el.classList.toggle('urgent', state.remainingSec <= 60);
+  }
+
+  function loadHanjaList(){
+    if (!isBackendConfigured()){
+      // 아직 GAS_URL 미설정 → 샘플 데이터로 동작(테스트용)
+      state.hanjaList = SAMPLE_HANJA_DATA.slice();
+      showErr('⚠ GAS_URL이 아직 설정되지 않아 샘플 데이터로 실행 중입니다. 설정가이드.md를 참고해 실제 백엔드를 연결하세요.', true);
+      return Promise.resolve();
+    }
+    return fetch(GAS_URL).then(function(r){ return r.json(); }).then(function(data){
+      if (data && data.ok && data.hanjaList && data.hanjaList.length){
+        state.hanjaList = data.hanjaList;
+      } else {
+        state.hanjaList = SAMPLE_HANJA_DATA.slice();
+        showErr('⚠ 서버에서 한자 목록을 받아오지 못해 샘플 데이터로 대체합니다.', true);
+      }
+    }).catch(function(){
+      state.hanjaList = SAMPLE_HANJA_DATA.slice();
+      showErr('⚠ 백엔드 연결 실패 — 샘플 데이터로 실행 중입니다.', true);
+    });
+  }
+
+  function showErr(msg, autoHide){
+    const el = $('err-banner');
+    el.textContent = msg;
+    el.style.display = 'block';
+    if (autoHide){ setTimeout(function(){ el.style.display='none'; }, 5000); }
+  }
+
+  function onOrientation(e){
+    if (state.manualMode) return;
+    let heading;
+    if (typeof e.webkitCompassHeading === 'number'){
+      heading = e.webkitCompassHeading; // iOS: 이미 진북 기준
+    } else if (e.absolute && e.alpha != null){
+      heading = (360 - e.alpha) % 360; // Android(대략치)
+    } else if (e.alpha != null){
+      heading = (360 - e.alpha) % 360;
+    } else {
+      return;
+    }
+    state.heading = (heading + state.calOffset + 360) % 360;
+    renderFrame();
+  }
+
+  function remainingTargets(){
+    return state.hanjaList.filter(function(h){ return !state.captured[h.id]; });
+  }
+
+  function renderFrame(){
+    if (!state.currentPos) return;
+    const targets = remainingTargets().map(function(h){
+      const dist = distanceMeters(state.currentPos.lat, state.currentPos.lng, h.lat, h.lng);
+      const brg = bearingDeg(state.currentPos.lat, state.currentPos.lng, h.lat, h.lng);
+      const offset = angleDiffSigned(brg, state.heading); // -180~180
+      return Object.assign({}, h, { dist:dist, bearing:brg, offset:offset });
+    });
+    targets.sort(function(a,b){ return a.dist-b.dist; });
+
+    renderCompassTape(targets);
+    renderARLayer(targets);
+    renderNearestInfo(targets);
+    renderDebug(targets);
+    updateMyMapMarker();
+  }
+
+  function renderCompassTape(targets){
+    const wrap = $('compass-tape');
+    wrap.innerHTML = '';
+    const RANGE = GAME_CONFIG.TAPE_RANGE_DEG;
+    const wrapWidth = $('compass-tape-wrap').clientWidth || 360;
+    // 동서남북 표시
+    [0,90,180,270].forEach(function(deg){
+      const off = angleDiffSigned(deg, state.heading);
+      if (Math.abs(off) > RANGE) return;
+      const x = (off/RANGE) * (wrapWidth/2);
+      const label = deg===0?'N':deg===90?'E':deg===180?'S':'W';
+      const m = document.createElement('div');
+      m.className='tape-mark';
+      m.style.left = 'calc(50% + ' + x + 'px)';
+      m.innerHTML = '<span class="tape-cardinal">'+label+'</span>';
+      wrap.appendChild(m);
+    });
+    targets.forEach(function(t){
+      if (Math.abs(t.offset) > RANGE) return;
+      const x = (t.offset/RANGE) * (wrapWidth/2);
+      const m = document.createElement('div');
+      m.className='tape-mark';
+      m.style.left = 'calc(50% + ' + x + 'px)';
+      m.innerHTML = '<span class="glyph">'+t.hanja+'</span><span>'+Math.round(t.dist)+'m</span>';
+      wrap.appendChild(m);
+    });
+  }
+
+  function renderARLayer(targets){
+    const layer = $('ar-layer');
+    layer.innerHTML = '';
+    const FOV = GAME_CONFIG.AR_FOV_DEG;
+    const screenW = window.innerWidth;
+    targets.forEach(function(t){
+      if (Math.abs(t.offset) > FOV/2) return; // 시야 밖
+      const inRange = state.forceInRange || t.dist <= t.radius;
+      const aligned = Math.abs(t.offset) <= GAME_CONFIG.ALIGN_TOLERANCE_DEG;
+      const capturable = inRange && aligned;
+
+      const x = screenW/2 + (t.offset/(FOV/2)) * (screenW*0.42);
+      const baseScale = Math.max(0.55, Math.min(1, 1 - (t.dist/(t.radius*6))));
+      // 포착 가능한 한자는 다른 한자보다 눈에 띄게 커지고(스케일 업) 항상 맨 앞(z-index)에 보이도록 함
+      const scale = capturable ? Math.max(baseScale, 1) * 1.4 : baseScale;
+
+      const el = document.createElement('div');
+      el.className = 'ar-marker' + (capturable?' capturable':'');
+      el.style.left = x + 'px';
+      el.style.transform = 'translate(-50%,-50%) scale('+scale.toFixed(2)+')';
+      el.innerHTML =
+        '<div class="ar-glyph">'+t.hanja+'</div>' +
+        '<div class="ar-dist">'+Math.round(t.dist)+'m'+(capturable?' · 포획 가능!':'')+'</div>' +
+        (capturable ? '<button class="ar-tapbtn" data-id="'+t.id+'">👆 포획하기</button>' : '');
+      layer.appendChild(el);
+    });
+    layer.querySelectorAll('.ar-tapbtn').forEach(function(btn){
+      btn.addEventListener('click', function(){ openQuiz(btn.getAttribute('data-id')); });
+    });
+  }
+
+  function renderNearestInfo(targets){
+    if (!targets.length) return;
+    const t = targets[0];
+    const inRange = state.forceInRange || t.dist <= t.radius;
+    const aligned = Math.abs(t.offset) <= GAME_CONFIG.ALIGN_TOLERANCE_DEG;
+    let arrow = '➜';
+    if (Math.abs(t.offset) <= 15) arrow = '⬆️';
+    else if (t.offset > 15) arrow = '↗️';
+    else arrow = '↖️';
+    $('nearest-arrow').textContent = arrow;
+    $('nearest-arrow').style.transform = 'rotate(' + t.offset + 'deg)';
+    let msg;
+    if (inRange && aligned){ msg = '🎯 <b>'+ '한자가 근처에 있어요! AR 화면을 확인하세요' +'</b>'; }
+    else if (!inRange){ msg = '가장 가까운 목표까지 <b>'+Math.round(t.dist)+'m</b> — 그 방향으로 이동하세요'; }
+    else { msg = '거의 다 왔어요! 휴대폰을 <b>'+(t.offset>0?'오른쪽':'왼쪽')+'</b>으로 돌려 방향을 맞춰보세요'; }
+    $('nearest-text').innerHTML = msg;
+  }
+
+  function renderDebug(targets){
+    $('dbg-heading').textContent = Math.round(state.heading)+'°';
+    if (state.currentPos) $('dbg-pos').textContent = state.currentPos.lat.toFixed(5)+', '+state.currentPos.lng.toFixed(5);
+    if (targets.length) $('dbg-nearest').textContent = targets[0].hanja+' ('+Math.round(targets[0].dist)+'m, '+Math.round(targets[0].offset)+'°)';
+  }
+
+  /* ---------------- 퀴즈 & 포획 ---------------- */
+  function openQuiz(hanjaId){
+    const h = state.hanjaList.find(function(x){ return x.id===hanjaId; });
+    if (!h || state.captured[h.id]) return;
+    state.activeQuiz = { hanja:h, attempts:0, startedAt:Date.now() };
+    $('quiz-hanja').textContent = h.hanja;
+    $('quiz-feedback').textContent = '';
+    $('quiz-attempts').textContent = '';
+    $('quiz-hint').textContent = '';
+    $('quiz-hint').classList.remove('show');
+    renderQuizOptions(h);
+    $('quiz-modal').classList.remove('hidden');
+  }
+
+  function renderQuizOptions(h){
+    const others = state.hanjaList.filter(function(x){ return x.id!==h.id; });
+    let wrongPool = [h.wrong1, h.wrong2, h.wrong3].filter(Boolean);
+    while (wrongPool.length < 3 && others.length){
+      const cand = others[Math.floor(Math.random()*others.length)].reading;
+      if (cand && wrongPool.indexOf(cand) === -1 && cand !== h.reading) wrongPool.push(cand);
+      if (others.length <= wrongPool.length) break;
+    }
+    const opts = shuffle([h.reading].concat(wrongPool.slice(0,3)));
+    const wrap = $('quiz-opts');
+    wrap.innerHTML = '';
+    opts.forEach(function(opt){
+      const b = document.createElement('button');
+      b.className='quiz-opt';
+      b.textContent = opt;
+      b.addEventListener('click', function(){ answerQuiz(opt, b); });
+      wrap.appendChild(b);
+    });
+  }
+
+  function shuffle(arr){
+    const a = arr.slice();
+    for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+    return a;
+  }
+
+  function answerQuiz(chosen, btnEl){
+    const q = state.activeQuiz;
+    if (!q) return;
+    q.attempts++;
+    const correct = chosen === q.hanja.reading;
+    document.querySelectorAll('.quiz-opt').forEach(function(b){ b.disabled = true; });
+    if (correct){
+      btnEl.classList.add('correct');
+      $('quiz-feedback').textContent = '정답입니다! 🎉' + (q.hanja.radical ? ' (부수: '+q.hanja.radical+')' : '');
+      const elapsedSec = Math.round((Date.now()-q.startedAt)/1000);
+      const score = Math.max(3, 10 - (q.attempts-1)*2);
+      state.captured[q.hanja.id] = { attempts:q.attempts, score:score, mine:true, capturedBy:state.name };
+      postToBackend({
+        action:'capture', name:state.name, studentId:state.studentId, team:state.team,
+        hanjaId:q.hanja.id, hanja:q.hanja.hanja, correctAnswer:q.hanja.reading,
+        chosenAnswer:chosen, isCorrect:true, attempts:q.attempts, elapsedSec:elapsedSec,
+        lat: state.currentPos?state.currentPos.lat:null, lng: state.currentPos?state.currentPos.lng:null,
+        score: score
+      });
+      setTimeout(function(){
+        $('quiz-modal').classList.add('hidden');
+        state.activeQuiz = null;
+        showToast('✅ '+q.hanja.hanja+'('+q.hanja.reading+') 포획!'+(q.hanja.radical?' 부수 '+q.hanja.radical:'')+' +'+score+'점');
+        updateHud();
+        renderFrame();
+        checkFinish();
+        if (state.mapModalOpen) renderMapMarkers();
+      }, 900);
+    } else {
+      btnEl.classList.add('wrong');
+      $('quiz-feedback').textContent = '아쉬워요! 다시 골라보세요.';
+      $('quiz-attempts').textContent = '시도 '+q.attempts+'회';
+      if (q.attempts >= GAME_CONFIG.HINT_AFTER_WRONG && q.hanja.hint){
+        const hintEl = $('quiz-hint');
+        hintEl.textContent = '💡 힌트: ' + q.hanja.hint;
+        hintEl.classList.add('show');
+      }
+      setTimeout(function(){
+        document.querySelectorAll('.quiz-opt').forEach(function(b){ b.disabled=false; b.classList.remove('wrong'); });
+      }, 700);
+    }
+  }
+
+  function updateHud(){
+    const total = state.hanjaList.length;
+    const capturedCount = Object.keys(state.captured).length;
+    const totalScore = Object.values(state.captured).reduce(function(s,c){ return s+c.score; }, 0);
+    $('hud-progress').textContent = '찾은 한자 '+capturedCount+' / '+total;
+    $('hud-score').textContent = totalScore+'점';
+  }
+
+  function checkFinish(){
+    const total = state.hanjaList.length;
+    const capturedCount = Object.keys(state.captured).length;
+    if (capturedCount >= total && total > 0){
+      setTimeout(function(){ showFinish('complete'); }, 600);
+    }
+  }
+
+  function showFinish(reason){
+    if (state.watchId != null) navigator.geolocation.clearWatch(state.watchId);
+    stopTimer();
+    stopDexPoll();
+    $('quiz-modal').classList.add('hidden');
+    const total = state.hanjaList.length;
+    const capturedCount = Object.keys(state.captured).length;
+    const myScore = Object.values(state.captured).filter(function(c){ return c.mine; }).reduce(function(s,c){ return s+(c.score||0); }, 0);
+    const teamScore = Object.values(state.captured).reduce(function(s,c){ return s+(c.score||0); }, 0);
+    const elapsedMin = Math.round((Date.now()-state.startedAt)/60000);
+    const scoreText = state.team
+      ? ('내 점수 <b style="color:var(--accent2)">'+myScore+'점</b> · "'+state.team+'" 팀 전체 <b style="color:var(--accent2)">'+teamScore+'점</b>')
+      : ('총 <b style="color:var(--accent2)">'+myScore+'점</b> 획득');
+
+    if (reason === 'timeup'){
+      $('finish-title').textContent = '⏰ 시간 종료!';
+      $('finish-summary').innerHTML = state.name+' 학생, 제한시간 동안 '+capturedCount+' / '+total+'개 (팀 전체 기준) 확보, '+scoreText+'!';
+    } else {
+      $('finish-title').textContent = '🎉 모든 한자 포획 완료!';
+      $('finish-summary').innerHTML = state.name+' 학생, '+scoreText+'! (소요 시간 약 '+elapsedMin+'분)';
+    }
+
+    const list = $('finish-list');
+    list.innerHTML = '';
+    state.hanjaList.forEach(function(h){
+      const c = state.captured[h.id];
+      const row = document.createElement('div');
+      row.className='finish-row';
+      let detail = '미포획';
+      if (c){
+        detail = c.mine ? (c.attempts+'회 시도 · '+c.score+'점') : ('팀원('+(c.capturedBy||'?')+') 포획');
+      }
+      row.innerHTML = '<span><span class="g">'+h.hanja+'</span>'+h.reading+(h.radical?' · 부수 '+escapeHtml(h.radical):'')+'</span><span>'+detail+'</span>';
+      list.appendChild(row);
+    });
+    show('screen-finish');
+  }
+
+  $('btn-restart').addEventListener('click', function(){ location.reload(); });
+
+  function showToast(msg){
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(function(){ t.classList.remove('show'); }, 2200);
+  }
+
+  /* ---------------- 리더보드 ---------------- */
+  function openLeaderboard(){
+    $('leaderboard-modal').classList.remove('hidden');
+    $('lb-list').innerHTML = '<div class="lb-loading">불러오는 중...</div>';
+
+    if (!isBackendConfigured()){
+      $('lb-list').innerHTML = '<div class="lb-empty">GAS_URL이 설정되지 않아 리더보드를 불러올 수 없습니다(샘플 모드).</div>';
+      return;
+    }
+    fetch(GAS_URL + '?action=leaderboard').then(function(r){ return r.json(); }).then(function(data){
+      renderLeaderboard(data && data.ok ? data.leaderboard : []);
+    }).catch(function(){
+      $('lb-list').innerHTML = '<div class="lb-empty">리더보드를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>';
+    });
+  }
+
+  function renderLeaderboard(list){
+    const wrap = $('lb-list');
+    wrap.innerHTML = '';
+    if (!list || !list.length){
+      wrap.innerHTML = '<div class="lb-empty">아직 기록이 없습니다.</div>';
+      return;
+    }
+    list.forEach(function(row, i){
+      const isMe = state.name && row.name === state.name && String(row.studentId) === String(state.studentId);
+      const el = document.createElement('div');
+      el.className = 'lb-row' + (isMe ? ' me' : '');
+      el.innerHTML =
+        '<div class="lb-rank">'+(i+1)+'</div>' +
+        '<div class="lb-name">'+escapeHtml(row.name)+'<span class="sid">'+escapeHtml(String(row.studentId||''))+'</span></div>' +
+        '<div class="lb-score">'+(row.totalScore||0)+'점 · '+(row.capturedCount||0)+'개</div>';
+      wrap.appendChild(el);
+    });
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c];
+    });
+  }
+
+  $('btn-open-leaderboard-start').addEventListener('click', openLeaderboard);
+  $('btn-open-leaderboard-finish').addEventListener('click', openLeaderboard);
+  $('btn-close-leaderboard').addEventListener('click', function(){
+    $('leaderboard-modal').classList.add('hidden');
+  });
+
+  /* ---------------- 도감 ---------------- */
+  function openDex(){
+    $('dex-modal').classList.remove('hidden');
+    state.dexModalOpen = true;
+    $('dex-grid').innerHTML = '<div class="lb-loading">불러오는 중...</div>';
+
+    const ensureList = state.hanjaList.length ? Promise.resolve() : loadHanjaList();
+
+    ensureList.then(function(){
+      // 시작 화면에서 바로 열람할 수도 있으므로, 등록 전이면 입력 필드 값을 그대로 사용
+      const team = state.team || $('input-team').value.trim();
+      const name = state.name || $('input-name').value.trim();
+      const studentId = state.studentId || $('input-sid').value.trim();
+
+      if (!team && !(name && studentId)){
+        $('dex-sub').textContent = '이름·학번 또는 팀 코드를 입력하면 지금까지 모은 도감을 볼 수 있어요.';
+        renderDexGrid(buildDexMapFromState());
+        return;
+      }
+      $('dex-sub').textContent = team ? ('"'+team+'" 팀이 함께 모은 도감') : (name+' 학생의 도감');
+
+      // 1) 서버 응답을 기다리지 않고, 이미 로컬에서 알고 있는 것(이번 세션에 내가 직접 잡은 것 등)부터
+      //    즉시 표시한다 — 예전 버전에서는 여기서 서버 응답으로 완전히 덮어써버려서, 서버 조회가
+      //    느리거나 실패하면 방금 내가 잡은 한자도 "미발견"으로 보이는 문제가 있었다.
+      renderDexGrid(buildDexMapFromState());
+
+      if (!isBackendConfigured()) return; // 샘플 모드는 로컬 정보가 전부
+
+      // 2) 서버(기록 시트)에서 팀원 등 다른 사람이 모은 결과까지 받아와 병합한 뒤 다시 그린다.
+      fetchDexFromServer(team, name, studentId).then(function(dex){
+        mergeDexEntries(dex, team, name);
+        renderDexGrid(buildDexMapFromState());
+        updateHud();
+        checkFinish();
+      }).catch(function(){
+        // 서버 조회가 실패해도 1)에서 이미 로컬 데이터는 표시되어 있으므로 조용히 무시
+      });
+    });
+  }
+
+  function renderDexGrid(capturedMap){
+    const grid = $('dex-grid');
+    grid.innerHTML = '';
+    const list = state.hanjaList.length ? state.hanjaList : SAMPLE_HANJA_DATA;
+    if (!list.length){
+      grid.innerHTML = '<div class="lb-empty">한자 목록을 불러오지 못했습니다.</div>';
+      return;
+    }
+    list.forEach(function(h){
+      const c = capturedMap[h.id];
+      const el = document.createElement('div');
+      if (c){
+        el.className = 'dex-card found' + (c.mine ? ' mine' : '');
+        el.innerHTML =
+          '<div class="glyph">'+h.hanja+'</div>' +
+          '<div class="reading">'+escapeHtml(h.reading)+'</div>' +
+          (h.radical ? '<div class="radical">부수 '+escapeHtml(h.radical)+'</div>' : '') +
+          (c.capturedBy ? '<div class="by">'+escapeHtml(c.capturedBy)+'</div>' : '');
+      } else {
+        el.className = 'dex-card locked';
+        el.innerHTML = '<div class="glyph">?</div><div class="reading">???</div>';
+      }
+      grid.appendChild(el);
+    });
+  }
+
+  $('btn-open-dex-start').addEventListener('click', openDex);
+  $('btn-open-dex-game').addEventListener('click', openDex);
+  $('btn-open-dex-finish').addEventListener('click', openDex);
+  $('btn-close-dex').addEventListener('click', function(){
+    $('dex-modal').classList.add('hidden');
+    state.dexModalOpen = false;
+  });
+
+  /* ---------------- 지도(미니맵) ---------------- */
+  // 지도 이미지 자체를 못 불러오면(경로 오류 등) 깨진 이미지 아이콘 대신 안내 문구로 대체.
+  // (MAP_IMAGE_URL이 설정된 경우에만 의미가 있으므로 리스너는 항상 걸어둬도 무해함)
+  $('map-img').addEventListener('error', function(){
+    $('map-wrap').innerHTML = '<div class="map-error">지도 이미지를 불러오지 못했습니다. GAME_CONFIG.MAP_IMAGE_URL 경로를 확인해 주세요.</div>';
+  });
+
+  function openMap(){
+    if (!isMapConfigured()) return;
+    $('map-modal').classList.remove('hidden');
+    state.mapModalOpen = true;
+    const img = $('map-img');
+    if (img && img.getAttribute('src') !== GAME_CONFIG.MAP_IMAGE_URL){
+      img.src = GAME_CONFIG.MAP_IMAGE_URL;
+    }
+    const ensureList = state.hanjaList.length ? Promise.resolve() : loadHanjaList();
+    ensureList.then(renderMapMarkers);
+  }
+
+  /** 도감과 동일하게, 이미 아는(state.captured) 정보만으로 즉시 그린다 — 서버 재조회는 하지 않는다
+   *  (도감/지도를 동시에 열람할 일은 드물고, 포획·도감 동기화 시점에 이미 함께 갱신되기 때문). */
+  function renderMapMarkers(){
+    const markersEl = $('map-markers');
+    if (!markersEl) return; // 이미지 로드 실패로 map-wrap이 교체된 경우
+    markersEl.innerHTML = '';
+    const list = state.hanjaList.length ? state.hanjaList : SAMPLE_HANJA_DATA;
+    list.forEach(function(h){
+      if (h.lat == null || h.lng == null) return;
+      const pos = geoToImagePercent(h.lat, h.lng);
+      if (!pos) return;
+      const found = !!state.captured[h.id];
+      const el = document.createElement('div');
+      el.className = 'map-marker ' + (found ? 'found' : 'unfound');
+      el.style.left = pos.xPct + '%';
+      el.style.top = pos.yPct + '%';
+      if (found){
+        el.textContent = h.hanja;
+        el.title = h.hanja + '(' + h.reading + ')' + (h.radical ? ' · 부수 ' + h.radical : '');
+      } else {
+        el.textContent = '?';
+      }
+      markersEl.appendChild(el);
+    });
+    updateMyMapMarker();
+  }
+
+  /** 내 현재 위치 마커만 갱신(마커 요소를 지우지 않고 위치만 옮겨 깜빡임을 줄임). */
+  function updateMyMapMarker(){
+    if (!state.mapModalOpen) return;
+    const markersEl = $('map-markers');
+    if (!markersEl) return;
+    let me = document.getElementById('map-marker-me');
+    if (!state.currentPos){ if (me) me.remove(); return; }
+    const pos = geoToImagePercent(state.currentPos.lat, state.currentPos.lng);
+    if (!pos){ if (me) me.remove(); return; }
+    if (!me){
+      me = document.createElement('div');
+      me.id = 'map-marker-me';
+      me.className = 'map-marker me';
+      markersEl.appendChild(me);
+    }
+    me.style.left = pos.xPct + '%';
+    me.style.top = pos.yPct + '%';
+  }
+
+  $('btn-open-map-start').addEventListener('click', openMap);
+  $('btn-open-map-game').addEventListener('click', openMap);
+  $('btn-open-map-finish').addEventListener('click', openMap);
+  $('btn-close-map').addEventListener('click', function(){
+    $('map-modal').classList.add('hidden');
+    state.mapModalOpen = false;
+  });
+
+  /* ---------------- 디버그 패널 ---------------- */
+  $('debug-toggle').addEventListener('click', function(){
+    $('debug-panel').classList.toggle('hidden');
+  });
+  $('dbg-cal').addEventListener('input', function(e){
+    state.calOffset = Number(e.target.value);
+    $('dbg-cal-val').textContent = state.calOffset;
+    renderFrame();
+  });
+  $('dbg-heading-manual').addEventListener('input', function(e){
+    state.manualMode = true;
+    state.heading = Number(e.target.value);
+    renderFrame();
+  });
+  $('dbg-force-inrange').addEventListener('change', function(e){
+    state.forceInRange = e.target.checked;
+    renderFrame();
+  });
+
+  /* ---------------- 백엔드 통신 ---------------- */
+  function postToBackend(payload){
+    if (!isBackendConfigured()) return; // 샘플 모드에서는 전송 생략
+    try{
+      fetch(GAS_URL, {
+        method:'POST',
+        headers: { 'Content-Type':'text/plain;charset=utf-8' }, // CORS preflight 회피용(중요)
+        body: JSON.stringify(payload)
+      }).catch(function(){ queueForRetry(payload); });
+    }catch(e){ queueForRetry(payload); }
+  }
+  function queueForRetry(payload){
+    try{
+      const key='hanja_ar_pending_queue';
+      const q = JSON.parse(localStorage.getItem(key) || '[]');
+      q.push(payload);
+      localStorage.setItem(key, JSON.stringify(q));
+    }catch(e){ /* 무시 */ }
+  }
+  function flushRetryQueue(){
+    if (!isBackendConfigured()) return;
+    try{
+      const key='hanja_ar_pending_queue';
+      const q = JSON.parse(localStorage.getItem(key) || '[]');
+      if (!q.length) return;
+      localStorage.removeItem(key);
+      q.forEach(postToBackend);
+    }catch(e){ /* 무시 */ }
+  }
+  window.addEventListener('online', flushRetryQueue);
+
+  function show(id){
+    ['screen-start','screen-permission','screen-game','screen-finish'].forEach(function(s){
+      $(s).hidden = (s !== id);
+    });
+  }
+
+  window.addEventListener('resize', renderFrame);
+  flushRetryQueue();
+})();
+</script>
+</body>
+</html>
